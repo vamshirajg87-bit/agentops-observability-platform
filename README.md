@@ -1,14 +1,20 @@
 # AgentOps Intelligence Platform
 
-A local observability and diagnosis pipeline for AI-agent workloads. It collects OpenTelemetry traces from an
-agent, moves them through Kafka into PostgreSQL, models them with dbt, flags anomalies, produces a
-root-cause-analysis (RCA) investigation with ranked evidence for a chosen anomaly, and shows the result in a
-read-only Trace Viewer.
+AgentOps Intelligence Platform is a local observability and diagnosis pipeline for understanding why AI-agent runs
+fail or slow down. It collects OpenTelemetry traces from an agent, streams them through an OTLP Collector and
+Kafka, processes them in Python, stores them in PostgreSQL, models them with dbt, flags latency, error-rate and
+tool-failure anomalies, produces an evidence-backed root-cause-analysis (RCA) investigation for a chosen anomaly,
+and shows the result in a read-only local Trace Viewer.
 
 **Status: a validated local MVP, exercised with synthetic workloads.** It is not a production-ready or
 commercial platform, and nothing here claims production readiness, production-scale throughput, scalability or
 a measured RCA accuracy. The Trace Viewer is a local, unauthenticated tool; it is not a hosted public showcase,
-and no public demo exists. See [Limitations](#limitations) before relying on any part of it.
+and no public demo exists. The source code is publicly available on GitHub; this repository is not a hosted
+application or a production deployment, and it does not claim a formal GitHub Release. See
+[Limitations](#limitations) before relying on any part of it.
+
+**Where to go:** [architecture](docs/ARCHITECTURE.md), [setup and operations](docs/SETUP-AND-OPERATIONS.md),
+[validation and residual risks](docs/VALIDATION-AND-ACCEPTANCE.md), [license](#license).
 
 ## The problem
 
@@ -27,6 +33,34 @@ Synthetic agent / workload -> OpenTelemetry -> OTLP Collector -> Kafka -> stream
 
 Details, source files and a component-status matrix are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
+## What you can explore
+
+The repository contains the code and offline tests for each stage below. These are engineering capabilities
+exercised by the code and by a local, synthetic validation, not measured business outcomes. Which stages ran in the
+live validation is recorded in [Component status](#component-status) and in
+[docs/VALIDATION-AND-ACCEPTANCE.md](docs/VALIDATION-AND-ACCEPTANCE.md).
+
+1. **Synthetic agent telemetry.** A deterministic synthetic workload drives an instrumented agent that emits
+   OpenTelemetry spans with `gen_ai.*` and `agentops.*` attributes over OTLP gRPC
+   ([workload-generator/](workload-generator/), [demo-app/](demo-app/)).
+2. **Span processing.** Spans pass through the OTLP Collector to Kafka, and a stream processor converts them to
+   canonical span records and routes invalid records to a dead-letter topic
+   ([collector/](collector/), [stream-processor/](stream-processor/)).
+3. **Storage and trace reconstruction.** A storage consumer writes the spans to PostgreSQL, and dbt models group
+   them into traces and trace-level metrics ([storage-consumer/](storage-consumer/),
+   [db-bootstrap/](db-bootstrap/), [analytics/](analytics/)).
+4. **Anomaly detection.** A one-shot detector flags latency, error-rate and tool-failure anomalies
+   ([anomaly-detector/](anomaly-detector/)).
+5. **Evidence-backed root-cause analysis.** The analyzer investigates one anomaly by id and stores ranked evidence
+   ([rca-analyzer/](rca-analyzer/)). A confidence label such as HIGH is the analyzer's output for that
+   investigation, not a measured accuracy.
+6. **Local Trace Viewer.** A read-only, unauthenticated, loopback-only web interface for traces, anomalies and RCA
+   ([trace-viewer/](trace-viewer/), [docker/trace-viewer/README.md](docker/trace-viewer/README.md)).
+
+Around the pipeline, the deterministic workload can be checked against a plan, and a pinned harness reconciles each
+stage on a disposable Docker Compose project and cleans up afterwards. That harness is pinned to one Windows
+machine; see [Limitations](#limitations).
+
 ## Component status
 
 | Component | Implemented | Included in the successful end-to-end runs |
@@ -44,13 +78,17 @@ Details, source files and a component-status matrix are in [docs/ARCHITECTURE.md
 ran in the Phase 14.7 live validation described in
 [docs/VALIDATION-AND-ACCEPTANCE.md](docs/VALIDATION-AND-ACCEPTANCE.md).
 
+*Terminology.* "Phase 14.7" is the project's internal name for its live end-to-end validation: two accepted local
+runs, Step 4F (through anomaly detection) and Step 5F (adding the RCA analyzer and the Trace Viewer API).
+`B3J-###` identifiers in code comments and some documents are internal ticket references.
+
 **OpenInference is not implemented.** The repository contains no OpenInference dependency or reference. Spans are
 produced with the OpenTelemetry SDK and carry `gen_ai.*` and `agentops.*` attributes.
 
 ## Validation status
 
-Phase 14.7 ran the whole chain twice on a disposable Docker Compose project, each time ending in a verified
-cleanup. Each run sent 110 synthetic requests, stored 746 spans, detected 42 anomaly events and re-ran the
+Phase 14.7 ran the whole chain twice (Step 4F and Step 5F) on a disposable Docker Compose project, each time ending
+in a verified cleanup. Each run sent 110 synthetic requests, stored 746 spans, detected 42 anomaly events and re-ran the
 detector without inserting duplicates. The second run also investigated one CRITICAL tool-failure anomaly
 (five evidence rows, repeated without duplication) and checked it through the Trace Viewer API. These are
 reported historical results from the project owner's accepted local runs. The underlying evidence archive is
@@ -58,7 +96,8 @@ private and is not distributed with this repository, so the figures cannot be re
 residual-risk register is in [docs/VALIDATION-AND-ACCEPTANCE.md](docs/VALIDATION-AND-ACCEPTANCE.md).
 
 The accepted local Viewer dataset (38 traces, 2 anomalies, one HIGH-confidence RCA investigation with five
-evidence rows) is a different dataset from these end-to-end runs; its counts are not combined with theirs.
+evidence rows) comes from the project owner's separately accepted local Viewer instance, which is a different
+dataset from these end-to-end runs; its counts are not combined with theirs.
 
 This is successful end-to-end validation of a local MVP on one pinned Windows and Docker Desktop environment. It
 is not a certification of production readiness.
@@ -66,8 +105,8 @@ is not a certification of production readiness.
 ## Getting started
 
 [docs/SETUP-AND-OPERATIONS.md](docs/SETUP-AND-OPERATIONS.md) lists prerequisites, configuration, ports, startup
-and shutdown, and troubleshooting. There is no validated one-command start. Several setup paths there are
-source-derived and labelled unverified. The live end-to-end harness
+and shutdown, and troubleshooting. There is no validated one-command start, and no fresh-clone startup procedure
+has been verified. Several setup paths there are source-derived and labelled unverified. The live end-to-end harness
 ([workload-generator/run_e2e.py](workload-generator/run_e2e.py)) is pinned to a specific machine and is not an
 installer.
 
@@ -82,9 +121,10 @@ installer.
   document how the validation was done, and it refuses to run elsewhere until that code is edited deliberately.
   The retained E2E validation harness is machine-pinned and is not a portable fresh-clone installer.
   A CI workflow is deferred from the initial public release, so no CI result is claimed.
-- **Source state.** The validated implementation is provided as a clean public-release source tree on the `main`
-  branch, without importing the development repository's Git history. Local validation does not establish that a
-  public GitHub release has been published.
+- **Source state.** The source code is publicly available on GitHub as a clean source tree on the `main` branch,
+  without the development repository's Git history. Public source availability is distinct from a formal GitHub
+  Release, a hosted application and a production deployment; this repository claims none of those, and the
+  validation results above come from local runs only.
 - **Scale.** The benchmark and recovery work ([benchmarks/](benchmarks/),
   [workload-generator/PHASE-14.5-FAILURE-RECOVERY.md](workload-generator/PHASE-14.5-FAILURE-RECOVERY.md)) covers
   small synthetic workloads on one laptop and supports no production-capacity claim.
@@ -101,4 +141,5 @@ installer.
 
 AgentOps-owned source code is licensed under the Apache License, Version 2.0; see [LICENSE](LICENSE). Third-party
 dependencies and model weights are not covered by that license and keep their own licenses; see
-[THIRD-PARTY-LICENSES.md](THIRD-PARTY-LICENSES.md) for the reviewed inventory and its limitations.
+[THIRD-PARTY-LICENSES.md](THIRD-PARTY-LICENSES.md) for the reviewed inventory. That review is not an exhaustive
+audit.
