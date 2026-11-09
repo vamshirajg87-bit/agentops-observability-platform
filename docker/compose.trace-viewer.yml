@@ -1,0 +1,73 @@
+# docker/compose.trace-viewer.yml
+#
+# Adds the trace viewer (trace list, Anomalies tab and RCA panel) to the main
+# stack.  The main docker-compose.yml is not changed and must come FIRST,
+# because Compose resolves the paths below against the first file's directory
+# (the repository root).  Run from the repository root with your own .env:
+#
+#   docker compose -f docker-compose.yml -f docker/compose.trace-viewer.yml up -d --build trace-viewer
+#
+# then open http://127.0.0.1:8000/.  See docker/trace-viewer/README.md for the
+# prerequisites and the demonstration steps.
+#
+# SECURITY
+#   - The port is published on the loopback address of this machine only.
+#   - The viewer connects as trace_viewer_reader, a read-only role.  The
+#     password comes from .env; it is not written here.
+#   - The viewer has NO authentication.  Do not change the port binding to make
+#     it reachable from other machines.
+#   - The container is unprivileged, has no capabilities and a read-only root
+#     file system.
+#
+# LIMITATIONS
+#   - The anomaly and RCA endpoints read tables that only migration 015 makes
+#     readable to trace_viewer_reader.  A fresh or already-bootstrapped database
+#     gets it from db-bootstrap (registered as a post-marker upgrade, B3J-130C).
+#     Until it is applied the Anomalies tab shows an error.  See the README.
+#   - This overlay depends on db-bootstrap (below).  A legacy database that has
+#     platform objects but no bootstrap ledger is refused by db-bootstrap, so
+#     the viewer does not start, and this file CANNOT be used unchanged with
+#     such a database.  The README describes how the legacy database was
+#     demonstrated instead (isolated temporary containers, loopback only).
+#   - Verification status: this file has been validated with "docker compose
+#     config" only; the overlay itself has not been started.  The image built
+#     from the same Dockerfile has been built and run with the same isolation
+#     settings by hand (B3J-140 to B3J-142), not through this file.
+
+services:
+
+  trace-viewer:
+    build:
+      context: .
+      dockerfile: docker/trace-viewer/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      TRACE_VIEWER_DB_HOST: "postgres"
+      TRACE_VIEWER_DB_PORT: "5432"
+      TRACE_VIEWER_DB_NAME: "agentops"
+      TRACE_VIEWER_DB_USER: "trace_viewer_reader"
+      # The value the bootstrap gave the role; it is not written here.
+      TRACE_VIEWER_DB_PASSWORD: ${TRACE_VIEWER_DB_PASSWORD:?TRACE_VIEWER_DB_PASSWORD must be set in .env}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      db-bootstrap:
+        condition: service_completed_successfully
+    healthcheck:
+      # The liveness route does not touch the database.
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    networks:
+      - agentops-net

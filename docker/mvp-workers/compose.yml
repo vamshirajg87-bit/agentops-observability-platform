@@ -1,0 +1,196 @@
+# docker/mvp-workers/compose.yml
+#
+# An ISOLATED project for running the existing anomaly detector and RCA analyzer once, against the
+# spans-only dataset of scripts/agentops_mvp_demo.py (spans_only_sql), on a database of its own.
+#
+# It is NOT the MVP stack.  It shares nothing with docker/mvp/compose.yml (project "agentops-mvp"):
+#
+#   Compose project   agentops-mvp-workers
+#   Network           agentops-mvp-workers-net
+#   Data volume       agentops-mvp-workers-postgres-data   (fixed name, labelled agentops.mvp-workers)
+#   Containers        <project>-<service>-1, named by Compose; no service sets a container name
+#   Images            named after this project and the service; no "image:" tag is set anywhere
+#
+# PORTS.  PostgreSQL and the two workers publish nothing: PostgreSQL is reachable only from inside this
+# project's network.  The ONE published port is the opt-in "viewer" service (profile "viewer"), a second
+# trace viewer for this database only, bound to the loopback address 127.0.0.1:8001 (the MVP's own viewer
+# keeps 127.0.0.1:8000 and is not touched).  Without it, results are read with
+# scripts/agentops_mvp_workers.py (status), which goes through the container's own local socket.
+#
+# Always spell out the project name and this file, and use a credentials file of THIS project (create
+# it with scripts/agentops_mvp.py init-credentials --credentials-file <path>, a path ending in
+# agentops-mvp/credentials.env that is not the MVP's own).  Never reuse the MVP credentials file.
+#
+#   docker compose -p agentops-mvp-workers -f docker/mvp-workers/compose.yml --env-file <file> up -d --build postgres db-bootstrap
+#   docker compose -p agentops-mvp-workers -f docker/mvp-workers/compose.yml --env-file <file> run --rm --no-deps anomaly-detector
+#   docker compose -p agentops-mvp-workers -f docker/mvp-workers/compose.yml --env-file <file> run --rm --no-deps rca-analyzer --anomaly-id <id>
+#   docker compose -p agentops-mvp-workers -f docker/mvp-workers/compose.yml --env-file <file> --profile viewer up -d --build --no-deps viewer
+#
+# CREDENTIAL ISOLATION.  --env-file only supplies values for the ${...} substitutions below; it is never
+# given to a container.  Each service's "environment" lists exactly the variables it needs:
+#
+#   db-bootstrap       all eight passwords (it creates every role, then exits)
+#   postgres           POSTGRES_PASSWORD only
+#   anomaly-detector   ANOMALY_DETECTOR_DB_PASSWORD only
+#   rca-analyzer       RCA_ANALYZER_DB_PASSWORD only
+#   viewer             TRACE_VIEWER_DB_PASSWORD only
+#
+# The two workers are in the "workers" profile and the viewer in the "viewer" profile, so "up" never
+# starts any of them; a worker runs only when named in "run", the viewer only with --profile viewer.
+# Use --no-deps so that nothing else is started on their behalf.
+#
+# THE VIEWER.  Built from docker/trace-viewer/Dockerfile (the current source, image
+# agentops-mvp-workers-viewer), it connects as the read-only role trace_viewer_reader to this project's
+# database and shows the anomalies and RCA investigations the workers wrote.  It has no authentication:
+# never change its 127.0.0.1 binding.  The traces it lists are labelled as demonstration data, because
+# the spans carry the demo_seed marker; the anomalies and investigations are the workers' own output.
+#
+# LIMITS (nothing here has been started or built)
+#   - The bootstrap applying all 18 steps on a fresh volume is as unverified here as in docker/mvp.
+#   - Only the tool_latency and tool_failure signals are configured: the other signals read dbt mart
+#     tables that are empty until dbt runs.
+#   - No memory limits are set.
+
+name: agentops-mvp-workers
+
+x-worker-build: &worker_build
+  context: ../..
+  dockerfile: docker/workers/Dockerfile
+
+x-worker-hardening: &worker_hardening
+  restart: "no"
+  read_only: true
+  tmpfs:
+    - /tmp
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  networks:
+    - workers-net
+
+services:
+
+  postgres:
+    build:
+      context: ../..
+      dockerfile: docker/postgres/Dockerfile
+    restart: "no"
+    environment:
+      POSTGRES_DB: agentops
+      POSTGRES_USER: agentops
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 5432 -U agentops -d agentops"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+    networks:
+      - workers-net
+
+  db-bootstrap:
+    build:
+      context: ../..
+      dockerfile: docker/bootstrap/Dockerfile
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      BOOTSTRAP_DB_HOST: postgres
+      BOOTSTRAP_DB_PORT: "5432"
+      BOOTSTRAP_DB_NAME: agentops
+      BOOTSTRAP_DB_ADMIN_USER: agentops
+      BOOTSTRAP_DB_ADMIN_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+      GF_DATASOURCE_AGENTOPS_PASSWORD: ${GF_DATASOURCE_AGENTOPS_PASSWORD:?GF_DATASOURCE_AGENTOPS_PASSWORD must be set}
+      TRACE_VIEWER_DB_PASSWORD: ${TRACE_VIEWER_DB_PASSWORD:?TRACE_VIEWER_DB_PASSWORD must be set}
+      ANOMALY_DETECTOR_DB_PASSWORD: ${ANOMALY_DETECTOR_DB_PASSWORD:?ANOMALY_DETECTOR_DB_PASSWORD must be set}
+      RCA_ANALYZER_DB_PASSWORD: ${RCA_ANALYZER_DB_PASSWORD:?RCA_ANALYZER_DB_PASSWORD must be set}
+      INCIDENT_RETRIEVAL_DB_PASSWORD: ${INCIDENT_RETRIEVAL_DB_PASSWORD:?INCIDENT_RETRIEVAL_DB_PASSWORD must be set}
+      ALERT_EVALUATOR_DB_PASSWORD: ${ALERT_EVALUATOR_DB_PASSWORD:?ALERT_EVALUATOR_DB_PASSWORD must be set}
+      ALERT_NOTIFIER_DB_PASSWORD: ${ALERT_NOTIFIER_DB_PASSWORD:?ALERT_NOTIFIER_DB_PASSWORD must be set}
+    networks:
+      - workers-net
+
+  anomaly-detector:
+    profiles: ["workers"]
+    build: *worker_build
+    <<: *worker_hardening
+    depends_on:
+      postgres:
+        condition: service_healthy
+      db-bootstrap:
+        condition: service_completed_successfully
+    working_dir: /opt/agentops/anomaly-detector
+    entrypoint: ["python", "main.py"]
+    command: ["--config", "/opt/agentops/config/detector_config.json"]
+    environment:
+      ANOMALY_DETECTOR_DB_HOST: postgres
+      ANOMALY_DETECTOR_DB_PORT: "5432"
+      ANOMALY_DETECTOR_DB_NAME: agentops
+      ANOMALY_DETECTOR_DB_USER: anomaly_detector
+      ANOMALY_DETECTOR_DB_PASSWORD: ${ANOMALY_DETECTOR_DB_PASSWORD:?ANOMALY_DETECTOR_DB_PASSWORD must be set}
+
+  rca-analyzer:
+    profiles: ["workers"]
+    build: *worker_build
+    <<: *worker_hardening
+    depends_on:
+      postgres:
+        condition: service_healthy
+      db-bootstrap:
+        condition: service_completed_successfully
+    working_dir: /opt/agentops/rca-analyzer
+    # No default command: the anomaly id is always given on the command line (run ... --anomaly-id <id>).
+    entrypoint: ["python", "main.py"]
+    environment:
+      RCA_ANALYZER_DB_HOST: postgres
+      RCA_ANALYZER_DB_PORT: "5432"
+      RCA_ANALYZER_DB_NAME: agentops
+      RCA_ANALYZER_DB_USER: rca_analyzer
+      RCA_ANALYZER_DB_PASSWORD: ${RCA_ANALYZER_DB_PASSWORD:?RCA_ANALYZER_DB_PASSWORD must be set}
+
+  viewer:
+    profiles: ["viewer"]
+    build:
+      context: ../..
+      dockerfile: docker/trace-viewer/Dockerfile
+    <<: *worker_hardening
+    depends_on:
+      postgres:
+        condition: service_healthy
+      db-bootstrap:
+        condition: service_completed_successfully
+    environment:
+      TRACE_VIEWER_DB_HOST: postgres
+      TRACE_VIEWER_DB_PORT: "5432"
+      TRACE_VIEWER_DB_NAME: agentops
+      TRACE_VIEWER_DB_USER: trace_viewer_reader
+      TRACE_VIEWER_DB_PASSWORD: ${TRACE_VIEWER_DB_PASSWORD:?TRACE_VIEWER_DB_PASSWORD must be set}
+    ports:
+      # The only published port of this project, on the loopback address only.
+      - "127.0.0.1:8001:8000"
+    healthcheck:
+      # The liveness route does not touch the database.
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+networks:
+  workers-net:
+    name: agentops-mvp-workers-net
+    driver: bridge
+    labels:
+      agentops.mvp-workers: "true"
+
+volumes:
+  postgres-data:
+    name: agentops-mvp-workers-postgres-data
+    labels:
+      agentops.mvp-workers: "true"

@@ -1,0 +1,24 @@
+venv/
+.venv/
+__pycache__/
+*.pyc
+.env
+# Machine-specific Compose changes; see docker/compose.legacy-database.example.yml
+docker-compose.override.yml
+.vscode/
+.idea/
+.DS_Store
+# Credentials, private keys, logs and database dumps
+.env.*
+!.env.example
+credentials.env
+*.pem
+*.key
+*.p12
+*.pfx
+*.log
+*.dump
+*.sql.gz
+
+# Release-candidate preparation reports; kept locally, never part of the repository.
+_release-candidate-reports/

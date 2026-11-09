@@ -1,0 +1,77 @@
+# docker/bootstrap/compose.validation.yml
+#
+# Isolated stack for proving the database bootstrap on an EMPTY database
+# (Phase 14.2).  It is not the platform's Compose file and starts nothing of
+# the platform except a throwaway PostgreSQL and the bootstrap.
+#
+# Isolation:
+#   - always run under its own project name; containers, network and volume
+#     are then named after that project
+#   - no fixed container names and no published ports, so it cannot collide
+#     with the platform's own stack
+#   - its only volume is declared here; it never refers to another project's
+#
+# Every credential is supplied by the caller and must be a throwaway value
+# made for the validation run.  None is written in this file.
+#
+#   docker compose -p agentops-bsval \
+#     -f docker/bootstrap/compose.validation.yml --env-file <file> up ...
+#
+# Remove the validation stack, and only it, with the same -p and -f:
+#   docker compose -p agentops-bsval -f docker/bootstrap/compose.validation.yml \
+#     --env-file <file> down --volumes
+
+services:
+
+  postgres:
+    # The platform's own PostgreSQL image definition (PostgreSQL + pgvector).
+    build:
+      context: ../..
+      dockerfile: docker/postgres/Dockerfile
+
+    environment:
+      # The migrations name this database and this owner role.
+      POSTGRES_DB: agentops
+      POSTGRES_USER: agentops
+      POSTGRES_PASSWORD: ${BOOTSTRAP_DB_ADMIN_PASSWORD:?set BOOTSTRAP_DB_ADMIN_PASSWORD}
+
+    volumes:
+      - validation-postgres-data:/var/lib/postgresql/data
+
+    healthcheck:
+      # Over TCP on purpose: while the image initializes a new data directory
+      # its temporary server answers on the local socket only, and must not
+      # be reported as ready.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 5432 -U agentops -d agentops"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+
+  db-bootstrap:
+    build:
+      context: ../..
+      dockerfile: docker/bootstrap/Dockerfile
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+    restart: "no"
+
+    environment:
+      BOOTSTRAP_DB_HOST: postgres
+      BOOTSTRAP_DB_PORT: "5432"
+      BOOTSTRAP_DB_NAME: agentops
+      BOOTSTRAP_DB_ADMIN_USER: agentops
+      BOOTSTRAP_DB_ADMIN_PASSWORD: ${BOOTSTRAP_DB_ADMIN_PASSWORD:?set BOOTSTRAP_DB_ADMIN_PASSWORD}
+      GF_DATASOURCE_AGENTOPS_PASSWORD: ${GF_DATASOURCE_AGENTOPS_PASSWORD:?set GF_DATASOURCE_AGENTOPS_PASSWORD}
+      TRACE_VIEWER_DB_PASSWORD: ${TRACE_VIEWER_DB_PASSWORD:?set TRACE_VIEWER_DB_PASSWORD}
+      ANOMALY_DETECTOR_DB_PASSWORD: ${ANOMALY_DETECTOR_DB_PASSWORD:?set ANOMALY_DETECTOR_DB_PASSWORD}
+      RCA_ANALYZER_DB_PASSWORD: ${RCA_ANALYZER_DB_PASSWORD:?set RCA_ANALYZER_DB_PASSWORD}
+      INCIDENT_RETRIEVAL_DB_PASSWORD: ${INCIDENT_RETRIEVAL_DB_PASSWORD:?set INCIDENT_RETRIEVAL_DB_PASSWORD}
+      ALERT_EVALUATOR_DB_PASSWORD: ${ALERT_EVALUATOR_DB_PASSWORD:?set ALERT_EVALUATOR_DB_PASSWORD}
+      ALERT_NOTIFIER_DB_PASSWORD: ${ALERT_NOTIFIER_DB_PASSWORD:?set ALERT_NOTIFIER_DB_PASSWORD}
+
+volumes:
+  validation-postgres-data:

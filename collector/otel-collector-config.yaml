@@ -1,0 +1,31 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+exporters:
+  debug:
+    # "basic" is the default level and keeps telemetry exposure low.
+    # "detailed" can print sensitive span attributes to the collector logs.
+    # Use it only as an explicit, temporary, locally approved diagnostic
+    # procedure, never as the committed setting.
+    # Changing this does not remove logs that were already written.
+    verbosity: basic
+
+  kafka:
+    brokers:
+      - agentops-kafka:29092
+    traces:
+      topic: agentops.telemetry.otlp.traces
+      encoding: otlp_proto
+    partition_traces_by_id: true
+    
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      exporters: [debug, kafka]

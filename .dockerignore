@@ -1,0 +1,31 @@
+# Build context exclusions.
+#
+# The images of this repository are built with the repository root as their
+# context.  Nothing below is ever needed inside an image, and some of it must
+# never be: local credentials, the local virtualenv, and generated files.
+
+# Local credentials and machine-specific configuration
+.env
+.env.*
+!.env.example
+analytics/profiles.yml
+analytics/.user.yml
+
+# Version control and editor state
+.git
+.github
+.vscode
+.idea
+.DS_Store
+
+# Local Python environments and caches
+venv
+.venv
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+
+# dbt runtime output
+analytics/target
+analytics/logs
+analytics/dbt_packages

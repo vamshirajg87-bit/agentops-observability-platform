@@ -1,0 +1,29 @@
+name: 'agentops_analytics'
+version: '1.0.0'
+profile: 'agentops'
+
+config-version: 2
+
+model-paths: ["models"]
+
+target-path: "target"
+clean-targets:
+  - "target"
+  - "dbt_packages"
+
+models:
+  agentops_analytics:
+    # Default materialization for all models.
+    # Staging and intermediate models keep this view default.
+    # Mart models will override to +materialized: table in their own config.
+    +materialized: view
+    #
+    # Schema naming note:
+    # The target schema is set entirely by the profile's 'schema' value
+    # (defaults to 'analytics' via DBT_PG_SCHEMA env var in profiles.yml).
+    # No +schema is set here because dbt's default generate_schema_name macro
+    # concatenates {profile_schema}_{custom_schema} when a custom schema is
+    # provided — setting +schema: analytics alongside a profile schema of
+    # analytics would produce analytics_analytics, not analytics.
+    # The desired behaviour (models in 'analytics' schema) is achieved by
+    # leaving +schema unset and controlling the schema only through the profile.

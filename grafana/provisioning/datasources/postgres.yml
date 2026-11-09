@@ -1,0 +1,13 @@
+apiVersion: 1
+
+datasources:
+  - name: AgentOps PostgreSQL
+    type: postgres
+    url: postgres:5432
+    user: grafana_reader
+    jsonData:
+      database: agentops
+      sslmode: disable
+      postgresVersion: 1700
+    secureJsonData:
+      password: $__env{GF_DATASOURCE_AGENTOPS_PASSWORD}

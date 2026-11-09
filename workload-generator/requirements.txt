@@ -1,0 +1,19 @@
+# workload-generator/requirements.txt
+#
+# Runtime requirements of the workload generator.
+#
+# Planning (the default, without --send) needs nothing beyond the Python
+# standard library.
+#
+# Executing a plan (--send --mode real) runs the demo application's own agent
+# graph with its own instrumentation, so it needs exactly the packages the
+# demo application needs.  They are taken from its requirements file, so that
+# every version is pinned in one place.
+#
+# Install from the repository root:
+#   python -m pip install -r workload-generator/requirements.txt
+#
+# Keep this environment separate from the analytics (dbt) environment: the
+# two need different protobuf versions.
+
+-r ../demo-app/requirements.txt

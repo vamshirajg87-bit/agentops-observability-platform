@@ -1,0 +1,6 @@
+# dbt runtime files — never commit
+profiles.yml
+target/
+dbt_packages/
+logs/
+.user.yml

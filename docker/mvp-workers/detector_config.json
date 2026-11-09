@@ -1,0 +1,16 @@
+{
+  "run": {
+    "overlap_minutes": 10,
+    "initial_lookback_hours": 24
+  },
+  "groups": [
+    {
+      "signal_path": "tool_latency",
+      "service_name": "agentops-demo-app"
+    },
+    {
+      "signal_path": "tool_failure",
+      "service_name": "agentops-demo-app"
+    }
+  ]
+}

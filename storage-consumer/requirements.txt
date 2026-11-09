@@ -1,0 +1,18 @@
+# Storage consumer runtime dependencies
+
+# Kafka consumer
+# Pinned to match stream-processor and demo-app.
+confluent-kafka==2.15.0
+
+# Canonical schema deserialization.
+# Shared contract with demo-app and stream-processor; must use the same version.
+pydantic==2.13.5
+
+# PostgreSQL driver — psycopg 3 (binary distribution).
+# The [binary] extra bundles libpq statically, removing the system libpq
+# requirement for local development on Windows and Linux.
+# Constrained to psycopg3 line; psycopg4 is a separate package.
+psycopg[binary]>=3.1,<4.0
+
+# Test dependencies
+pytest==8.3.5

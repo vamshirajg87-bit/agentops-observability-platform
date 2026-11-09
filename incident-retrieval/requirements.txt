@@ -1,0 +1,37 @@
+# Incident retrieval runtime dependencies
+#
+# Versions verified against Python 3.13.7 (Windows AMD64 development).
+# CPU inference only.
+#
+# Install into the project venv from the repository root:
+#   pip install -r incident-retrieval/requirements.txt
+#
+# Windows PowerShell:
+#   pip install -r incident-retrieval\requirements.txt
+
+# Local embedding model runtime.
+# sentence_transformer_backend.py imports this lazily; incident_document.py,
+# embedding_provider.py and the unit tests do not need any package below
+# except pytest.
+sentence-transformers==6.1.0
+
+# Numeric backend. Determines the embedding values.
+torch==2.14.1
+
+# Model implementation used by sentence-transformers (allowed range is >=5,<6).
+transformers==5.18.0
+
+# Tokenization. Determines token counts and where truncation falls.
+tokenizers==0.23.2
+
+# Model cache and offline loading.
+# Must stay below 2.0: sentence-transformers 6.1.0 requires huggingface-hub<2.0.0.
+huggingface-hub==1.33.0
+
+# PostgreSQL driver -- psycopg 3 (binary distribution).
+# Used by embedding_store.py and retrieval_db.py for embedding persistence.
+# Same constraint as storage-consumer and trace-viewer.
+psycopg[binary]>=3.1,<4.0
+
+# Test dependencies
+pytest==8.3.5

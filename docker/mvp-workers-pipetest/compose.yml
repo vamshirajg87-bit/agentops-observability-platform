@@ -1,0 +1,130 @@
+# docker/mvp-workers-pipetest/compose.yml
+#
+# A DISPOSABLE validation environment for scripts/agentops_mvp_pipeline.py (target "pipetest").  It exists
+# so that the detector-to-RCA runner can be tried on a database that is not the accepted MVP's.
+#
+# It is NOT the accepted MVP and shares nothing with docker/mvp-workers/compose.yml (Compose project
+# "agentops-mvp-workers") or docker/mvp/compose.yml (project "agentops-mvp"):
+#
+#   Compose project   agentops-pipetest
+#   Network           agentops-pipetest-net      (fixed name, labelled agentops.pipetest)
+#   Data volume       agentops-pipetest-pgdata   (fixed name, labelled agentops.pipetest)
+#   Containers        <project>-<service>-1, named by Compose; no service sets a container name
+#   Images            EXISTING local images only, pull_policy never; there is no "build:" anywhere
+#
+# PORTS.  Nothing publishes a port.  PostgreSQL is reachable only from inside this project's network.
+#
+# CREDENTIALS.  No password is written here.  Every value comes from the --env-file given on the command
+# line, and ONLY these three variable names are used (they are deliberately not the names the accepted
+# projects use, so a credentials file made for an accepted project cannot be used here by accident:
+# Compose stops and names the missing variable):
+#
+#   PIPETEST_POSTGRES_PASSWORD               the database owner (read only by the PostgreSQL container;
+#                                            PostgreSQL ignores it when it starts on an existing data
+#                                            directory, but Compose requires a value)
+#   PIPETEST_ANOMALY_DETECTOR_DB_PASSWORD    role anomaly_detector
+#   PIPETEST_RCA_ANALYZER_DB_PASSWORD        role rca_analyzer
+#
+# --env-file only supplies values for the ${...} substitutions below; it is never given to a container.
+# Each service's "environment" lists exactly the variables it needs.  The runner's credentials path must
+# end agentops-pipetest/agentops-mvp/credentials.env.  A database restored from a copy of another database
+# carries that database's role passwords, so the values written to this file for the restored roles are a
+# deliberate choice of whoever restores it.
+#
+# THE RUNNER.  scripts/agentops_mvp_pipeline.py --target pipetest runs only these two services, one at a
+# time, with "run --rm -T --no-deps"; the workers are in the "workers" profile, so "up" never starts them.
+# It never starts, builds or stops anything else.
+#
+# LIMITS (nothing here has been created, started, restored or run)
+#   - No bootstrap service: this file does not create a database.  The data volume has to hold a bootstrapped
+#     AgentOps database before the runner will accept the target (it checks the 18-step ledger).
+#   - Only the isolated worker images are used.  They carry their own copy of the detector configuration.
+#   - No memory limits are set.
+
+name: agentops-pipetest
+
+x-worker-hardening: &worker_hardening
+  restart: "no"
+  pull_policy: never
+  read_only: true
+  tmpfs:
+    - /tmp
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  labels:
+    agentops.pipetest: "true"
+  networks:
+    - pipetest-net
+
+services:
+
+  postgres:
+    image: agentops-mvp-workers-postgres:latest
+    pull_policy: never
+    restart: "no"
+    labels:
+      agentops.pipetest: "true"
+    environment:
+      POSTGRES_DB: agentops
+      POSTGRES_USER: agentops
+      POSTGRES_PASSWORD: ${PIPETEST_POSTGRES_PASSWORD:?PIPETEST_POSTGRES_PASSWORD must be set}
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 5432 -U agentops -d agentops"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+    networks:
+      - pipetest-net
+
+  anomaly-detector:
+    profiles: ["workers"]
+    image: agentops-mvp-workers-anomaly-detector:latest
+    <<: *worker_hardening
+    depends_on:
+      postgres:
+        condition: service_healthy
+    working_dir: /opt/agentops/anomaly-detector
+    entrypoint: ["python", "main.py"]
+    command: ["--config", "/opt/agentops/config/detector_config.json"]
+    environment:
+      ANOMALY_DETECTOR_DB_HOST: postgres
+      ANOMALY_DETECTOR_DB_PORT: "5432"
+      ANOMALY_DETECTOR_DB_NAME: agentops
+      ANOMALY_DETECTOR_DB_USER: anomaly_detector
+      ANOMALY_DETECTOR_DB_PASSWORD: ${PIPETEST_ANOMALY_DETECTOR_DB_PASSWORD:?PIPETEST_ANOMALY_DETECTOR_DB_PASSWORD must be set}
+
+  rca-analyzer:
+    profiles: ["workers"]
+    image: agentops-mvp-workers-rca-analyzer:latest
+    <<: *worker_hardening
+    depends_on:
+      postgres:
+        condition: service_healthy
+    working_dir: /opt/agentops/rca-analyzer
+    # No default command: the anomaly id is always given on the command line (run ... --anomaly-id <id>).
+    entrypoint: ["python", "main.py"]
+    environment:
+      RCA_ANALYZER_DB_HOST: postgres
+      RCA_ANALYZER_DB_PORT: "5432"
+      RCA_ANALYZER_DB_NAME: agentops
+      RCA_ANALYZER_DB_USER: rca_analyzer
+      RCA_ANALYZER_DB_PASSWORD: ${PIPETEST_RCA_ANALYZER_DB_PASSWORD:?PIPETEST_RCA_ANALYZER_DB_PASSWORD must be set}
+
+networks:
+  pipetest-net:
+    name: agentops-pipetest-net
+    driver: bridge
+    labels:
+      agentops.pipetest: "true"
+
+volumes:
+  postgres-data:
+    name: agentops-pipetest-pgdata
+    labels:
+      agentops.pipetest: "true"

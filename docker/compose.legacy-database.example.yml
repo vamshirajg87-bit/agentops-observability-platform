@@ -1,0 +1,46 @@
+# docker/compose.legacy-database.example.yml
+#
+# TEMPORARY override for a developer whose PostgreSQL volume was created
+# BEFORE the database bootstrap existed (Phase 14.2).
+#
+# Such a database holds the platform's tables and roles but has no bootstrap
+# ledger.  The bootstrap never adopts a database it did not build: it refuses
+# it and exits with an error, and Grafana, which waits for the bootstrap,
+# would then never start.  This override keeps that existing database usable
+# exactly as it was:
+#
+#   - the db-bootstrap service is not started at all
+#   - Grafana waits for a healthy PostgreSQL only
+#
+# It changes nothing in the database and weakens nothing in the bootstrap.
+#
+# DO NOT use it for a new clone or a new, empty volume.  Without the
+# bootstrap an empty database stays empty and nothing works.
+#
+# How to use it (on your own machine only):
+#
+#   1. Copy this file to the repository root as docker-compose.override.yml.
+#      Compose loads a file of that name automatically.  It is listed in
+#      .gitignore and must never be committed.
+#   2. Make sure your .env holds POSTGRES_PASSWORD (the password your existing
+#      database was created with), GF_DATASOURCE_AGENTOPS_PASSWORD and a
+#      nonempty GF_SECURITY_ADMIN_PASSWORD.  The main Compose file needs all
+#      three set before it can be resolved.  GF_SECURITY_ADMIN_PASSWORD sets the
+#      Grafana administrator only for new Grafana state; it does not change the
+#      administrator of an existing Grafana volume.
+#   3. Run `docker compose up -d` as before.
+#
+# Remove docker-compose.override.yml as soon as you move to a database
+# created by the bootstrap; the default Compose file then needs no override.
+
+services:
+
+  db-bootstrap:
+    # A profile that is never activated: the service is defined but not run.
+    profiles: ["legacy-database-bootstrap-disabled"]
+
+  grafana:
+    # Replaces the whole dependency list of the main file.
+    depends_on: !override
+      postgres:
+        condition: service_healthy

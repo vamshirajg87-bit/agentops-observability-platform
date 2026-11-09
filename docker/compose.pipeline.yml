@@ -1,0 +1,99 @@
+# docker/compose.pipeline.yml
+#
+# Adds the two processing services of the ingestion path to the main stack:
+#
+#   stream-processor   raw OTLP topic  -> canonical topic   (Kafka only)
+#   storage-consumer   canonical topic -> PostgreSQL        (Kafka and PostgreSQL)
+#
+# The main docker-compose.yml is not changed and must come FIRST, because
+# Compose resolves the paths below against the first file's directory (the
+# repository root).  Run from the repository root with your own .env:
+#
+#   docker compose -f docker-compose.yml -f docker/compose.pipeline.yml up -d --build
+#
+# Nothing here publishes a port or changes an existing service.  The services
+# reach Kafka on its internal listener (the one the collector already uses) and
+# PostgreSQL by its service name.  Each waits for the topic initialisation and
+# the database bootstrap to have finished successfully, and the storage consumer
+# also for a healthy PostgreSQL.
+#
+# LIMITATIONS - read before using anywhere but a machine of your own
+#   - The storage consumer connects as the PostgreSQL OWNER role "agentops",
+#     with the owner password, because no restricted writer role exists yet.
+#     That is acceptable for local development only; it is not a secure
+#     configuration for a shared or public deployment.
+#   - The published ports of the main file (Kafka, OTLP, PostgreSQL, Grafana) are
+#     bound to the loopback address 127.0.0.1 of the host, so they accept
+#     connections from this machine only.  That is a network restriction, not
+#     authentication: the OTLP and Kafka endpoints still accept unauthenticated
+#     connections from any local process, and PostgreSQL and Grafana still rely
+#     on their own credentials.  This file does not change either.
+#   - Neither service has a health check: they print a line when subscribed and
+#     exit on an error; "restart: unless-stopped" brings them back.
+#   - Verification status: B3J-96 ran this overlay once on a disposable project, and the
+#     ingestion itself reconciled (20 traces, 140 of 140 spans through to PostgreSQL).
+#     That test's overall result was nevertheless FAIL, because one isolation assertion
+#     was mis-specified; the corrected assertion has not been run live.  Treat the stack
+#     as unverified beyond that single run.
+
+# One build recipe for both services.  There is deliberately no fixed "image:" tag:
+# each service's image is named after the Compose project (<project>-<service>), so
+# a second project (a disposable test, say) can never share, overwrite or leave
+# behind a tag, and "docker compose down --rmi local" removes exactly its own.
+# Both builds read the same Dockerfile and context, so the second is a cache hit.
+x-pipeline-build: &pipeline_build
+  build:
+    context: .
+    dockerfile: docker/pipeline/Dockerfile
+
+services:
+
+  stream-processor:
+    <<: *pipeline_build
+    working_dir: /opt/agentops/stream-processor
+    command: ["python", "main.py"]
+    restart: unless-stopped
+    environment:
+      # Topics, consumer group, retries and the de-duplication window keep the
+      # defaults in stream-processor/config.py.
+      KAFKA_BOOTSTRAP_SERVERS: "agentops-kafka:29092"
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+      db-bootstrap:
+        condition: service_completed_successfully
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    networks:
+      - agentops-net
+
+  storage-consumer:
+    <<: *pipeline_build
+    working_dir: /opt/agentops/storage-consumer
+    command: ["python", "main.py"]
+    restart: unless-stopped
+    environment:
+      # Topic and consumer group keep the defaults in storage-consumer/config.py.
+      KAFKA_BOOTSTRAP_SERVERS: "agentops-kafka:29092"
+      PG_HOST: "postgres"
+      PG_PORT: "5432"
+      PG_DATABASE: "agentops"
+      # The owner role: see LIMITATIONS above.  The value is the one PostgreSQL
+      # was given; it is not written here.
+      PG_USER: "agentops"
+      PG_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+      db-bootstrap:
+        condition: service_completed_successfully
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    networks:
+      - agentops-net

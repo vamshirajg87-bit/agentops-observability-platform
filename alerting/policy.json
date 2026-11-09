@@ -1,0 +1,40 @@
+{
+  "policy_schema_version": "1.0.0",
+  "policy_version": "1.0.0",
+  "evaluation": {
+    "enabled": true,
+    "min_severity": "WARNING",
+    "max_alert_age_minutes": 60,
+    "cooldown_minutes": 30,
+    "escalation_breaks_cooldown": true,
+    "max_alerts_per_hour": 10,
+    "persist_summary": false
+  },
+  "delivery": {
+    "max_delivery_age_minutes": 60,
+    "channels": [
+      {
+        "name": "log",
+        "type": "log",
+        "enabled": true,
+        "include_summary": false,
+        "max_attempts": 3,
+        "timeout_seconds": 10
+      },
+      {
+        "name": "local-file",
+        "type": "file",
+        "enabled": false,
+        "include_summary": false,
+        "max_attempts": 3,
+        "timeout_seconds": 10,
+        "path": "alert-notifications.jsonl"
+      }
+    ]
+  },
+  "guardrails": {
+    "detector_checkpoint_max_age_minutes": 1440,
+    "uninvestigated_anomaly_max_age_minutes": 60,
+    "delivery_lookback_hours": 24
+  }
+}

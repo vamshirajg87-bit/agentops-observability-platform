@@ -1,0 +1,251 @@
+services:
+
+  kafka:
+    image: apache/kafka:4.1.0
+    container_name: agentops-kafka
+
+    ports:
+      - "127.0.0.1:9092:9092"
+
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+
+      KAFKA_LISTENERS: "PLAINTEXT://:29092,CONTROLLER://:29093,PLAINTEXT_HOST://:9092"
+      KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://agentops-kafka:29092,PLAINTEXT_HOST://localhost:9092"
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT"
+
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@agentops-kafka:29093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+
+      # Single-broker local development settings.
+      # Production multi-broker deployments should use replicated internal topics.
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+
+    networks:
+      - agentops-net
+
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.160.0
+    container_name: agentops-otel-collector
+
+    command:
+      - "--config=/etc/otelcol-contrib/config.yaml"
+
+    volumes:
+      - ./collector/otel-collector-config.yaml:/etc/otelcol-contrib/config.yaml:ro
+
+    ports:
+      - "127.0.0.1:4317:4317"
+      - "127.0.0.1:4318:4318"
+
+    depends_on:
+      - kafka
+
+    networks:
+      - agentops-net
+
+
+  kafka-init:
+    image: apache/kafka:4.1.0
+    container_name: agentops-kafka-init
+
+    depends_on:
+      - kafka
+
+    command:
+      - /bin/bash
+      - -c
+      - |
+        echo "Waiting for Kafka..."
+        until /opt/kafka/bin/kafka-topics.sh --bootstrap-server agentops-kafka:29092 --list >/dev/null 2>&1; do
+          sleep 2
+        done
+
+        echo "Creating AgentOps Kafka topics..."
+
+        /opt/kafka/bin/kafka-topics.sh \
+          --bootstrap-server agentops-kafka:29092 \
+          --create \
+          --if-not-exists \
+          --topic agentops.telemetry.otlp.traces \
+          --partitions 3 \
+          --replication-factor 1
+
+        /opt/kafka/bin/kafka-topics.sh \
+          --bootstrap-server agentops-kafka:29092 \
+          --create \
+          --if-not-exists \
+          --topic agentops.telemetry.spans \
+          --partitions 3 \
+          --replication-factor 1
+
+        /opt/kafka/bin/kafka-topics.sh \
+          --bootstrap-server agentops-kafka:29092 \
+          --create \
+          --if-not-exists \
+          --topic agentops.telemetry.dlq \
+          --partitions 3 \
+          --replication-factor 1
+
+        echo "Kafka topic initialization complete."
+
+    networks:
+      - agentops-net
+
+
+  postgres:
+    build:
+      context: .
+      dockerfile: docker/postgres/Dockerfile
+    container_name: agentops-postgres
+
+    environment:
+      # The migrations name this database and this owner role.
+      POSTGRES_DB: agentops
+      POSTGRES_USER: agentops
+      # From the untracked .env file; never written here.  Required: without
+      # it nothing starts, so a new data directory can never be initialized
+      # with an empty password.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
+
+    ports:
+      - "127.0.0.1:5432:5432"
+
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+    healthcheck:
+      # Over TCP on purpose: while the image initializes a new data directory
+      # its temporary server answers on the local socket only, and must not be
+      # reported as ready to the services that connect over the network.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 5432 -U agentops -d agentops"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+
+    networks:
+      - agentops-net
+
+
+  # One-shot database bootstrap: applies the migrations and the dbt models to
+  # an EMPTY database in the one order that works, records every step in its
+  # ledger, and exits.  On a database it already completed it changes nothing
+  # and exits 0.  A database it did not build is refused and left untouched.
+  # Every service that needs the schema waits for it to finish successfully.
+  db-bootstrap:
+    build:
+      context: .
+      dockerfile: docker/bootstrap/Dockerfile
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+    restart: "no"
+
+    environment:
+      BOOTSTRAP_DB_HOST: postgres
+      BOOTSTRAP_DB_PORT: "5432"
+      BOOTSTRAP_DB_NAME: agentops
+      BOOTSTRAP_DB_ADMIN_USER: agentops
+      # The same value PostgreSQL was given; there is no second copy of it.
+      BOOTSTRAP_DB_ADMIN_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
+      # One password per application role, used to create the role here and
+      # later by the service that logs in with it.  The bootstrap refuses to
+      # run when one is missing.
+      GF_DATASOURCE_AGENTOPS_PASSWORD: ${GF_DATASOURCE_AGENTOPS_PASSWORD:?GF_DATASOURCE_AGENTOPS_PASSWORD must be set in .env}
+      TRACE_VIEWER_DB_PASSWORD: ${TRACE_VIEWER_DB_PASSWORD:-}
+      ANOMALY_DETECTOR_DB_PASSWORD: ${ANOMALY_DETECTOR_DB_PASSWORD:-}
+      RCA_ANALYZER_DB_PASSWORD: ${RCA_ANALYZER_DB_PASSWORD:-}
+      INCIDENT_RETRIEVAL_DB_PASSWORD: ${INCIDENT_RETRIEVAL_DB_PASSWORD:-}
+      ALERT_EVALUATOR_DB_PASSWORD: ${ALERT_EVALUATOR_DB_PASSWORD:-}
+      ALERT_NOTIFIER_DB_PASSWORD: ${ALERT_NOTIFIER_DB_PASSWORD:-}
+
+    networks:
+      - agentops-net
+
+
+  # One-shot analytics refresh: rebuilds the dbt models, re-applies the grants
+  # a dbt run removes, and verifies every analytics grant.  It accepts only a
+  # database the bootstrap has finished and changes nothing in any other.
+  #
+  # It belongs to a profile, so `docker compose up` never starts it.  Run it
+  # when the analytics models have to be rebuilt:
+  #
+  #   docker compose run --rm analytics-refresh
+  analytics-refresh:
+    profiles: ["analytics-refresh"]
+
+    build:
+      context: .
+      dockerfile: docker/bootstrap/Dockerfile
+
+    # The same image as db-bootstrap, started with its second program.
+    entrypoint: ["python", "/opt/agentops/db-bootstrap/analytics_refresh.py"]
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+    restart: "no"
+
+    environment:
+      BOOTSTRAP_DB_HOST: postgres
+      BOOTSTRAP_DB_PORT: "5432"
+      BOOTSTRAP_DB_NAME: agentops
+      BOOTSTRAP_DB_ADMIN_USER: agentops
+      # The owner password only: the refresh creates no role and is given no
+      # application role's password.
+      BOOTSTRAP_DB_ADMIN_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
+
+    networks:
+      - agentops-net
+
+
+  grafana:
+    image: grafana/grafana:13.2.2
+    container_name: agentops-grafana
+
+    ports:
+      - "127.0.0.1:3000:3000"
+
+    environment:
+      GF_DATASOURCE_AGENTOPS_PASSWORD: ${GF_DATASOURCE_AGENTOPS_PASSWORD:?GF_DATASOURCE_AGENTOPS_PASSWORD must be set in .env}
+      GF_SECURITY_ADMIN_PASSWORD: ${GF_SECURITY_ADMIN_PASSWORD:?GF_SECURITY_ADMIN_PASSWORD must be set in .env}
+
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+
+    # Grafana reads the analytics schema as grafana_reader; both exist only
+    # after the bootstrap has finished.
+    depends_on:
+      postgres:
+        condition: service_healthy
+      db-bootstrap:
+        condition: service_completed_successfully
+
+    networks:
+      - agentops-net
+
+
+networks:
+  agentops-net:
+    driver: bridge
+
+
+volumes:
+  kafka-data:
+  postgres-data:
+  grafana-data:

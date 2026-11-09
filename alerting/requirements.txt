@@ -1,0 +1,18 @@
+# Alerting runtime dependencies
+#
+# Install into the project venv from the repository root:
+#   pip install -r alerting/requirements.txt
+#
+# Windows PowerShell:
+#   pip install -r alerting\requirements.txt
+#
+# The contract modules (alert_version.py, alert_models.py, alert_identity.py,
+# alert_policy.py) and their unit tests use the standard library only and
+# need no package below except pytest.
+
+# PostgreSQL driver -- psycopg 3 (binary distribution).
+# Same constraint as storage-consumer, trace-viewer and incident-retrieval.
+psycopg[binary]>=3.1,<4.0
+
+# Test dependencies
+pytest==8.3.5

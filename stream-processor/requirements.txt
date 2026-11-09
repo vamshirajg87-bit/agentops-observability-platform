@@ -1,0 +1,21 @@
+# Stream processor runtime dependencies
+
+# Kafka consumer/producer
+# Pinned to match demo-app.
+confluent-kafka==2.15.0
+
+# Canonical schema and validation.
+# Shared contract with demo-app; must use the same version.
+pydantic==2.13.5
+
+# OTLP protobuf decoding.
+# opentelemetry-proto provides the generated pb2 modules
+# (ExportTraceServiceRequest and supporting types).
+# Version pinned to match demo-app's opentelemetry-* stack.
+opentelemetry-proto==1.44.0
+
+# Google protobuf runtime required by opentelemetry-proto.
+protobuf>=4.21.0,<6.0.0
+
+# Test dependencies
+pytest==8.3.5

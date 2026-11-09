@@ -1,0 +1,250 @@
+version: 2
+
+models:
+  - name: mart_trace_metrics
+    description: >
+      One row per distributed trace. Aggregates span-level data into trace-level
+      timing, structure, and error counts. Primary mart for trace-level dashboards.
+    columns:
+      - name: trace_id
+        description: Unique identifier for the distributed trace.
+        tests:
+          - not_null
+          - unique
+      - name: trace_start_time
+        description: Earliest span start_time within the trace.
+      - name: trace_end_time
+        description: Latest span end_time within the trace.
+      - name: trace_duration_ms
+        description: Wall-clock duration of the trace in milliseconds (end - start).
+      - name: root_span_id
+        description: span_id of the root span (parent_span_id IS NULL).
+      - name: root_span_name
+        description: span_name of the root span.
+      - name: root_service_name
+        description: service_name of the root span.
+      - name: request_id
+        description: Request identifier from the root span; NULL on non-root spans.
+      - name: session_id
+        description: Session identifier from the root span; NULL on non-root spans.
+      - name: span_count
+        description: Total number of spans in the trace.
+      - name: service_count
+        description: Number of distinct services observed in the trace.
+      - name: error_span_count
+        description: Number of spans with status_code = 'ERROR'.
+      - name: agent_span_count
+        description: Number of spans where agent_name is not null.
+      - name: tool_span_count
+        description: Number of spans where tool_name is not null.
+      - name: retrieval_span_count
+        description: Number of spans where retrieval_result_count is not null.
+      - name: has_error
+        description: True if any span in the trace has status_code = 'ERROR'.
+
+  - name: mart_agent_metrics
+    description: >
+      One row per agent span. Filtered to spans where agent_name is not null.
+      Used for agent-level performance and error dashboards.
+    columns:
+      - name: trace_id
+        description: Distributed trace identifier.
+        tests:
+          - not_null
+      - name: span_id
+        description: Unique span identifier within the trace.
+        tests:
+          - not_null
+      - name: parent_span_id
+        description: Parent span identifier; NULL for root spans.
+      - name: span_name
+        description: Name of the span operation.
+      - name: span_kind
+        description: OpenTelemetry span kind (CLIENT, SERVER, INTERNAL, etc.).
+      - name: service_name
+        description: Name of the service that emitted this span.
+      - name: start_time
+        description: Span start timestamp.
+      - name: end_time
+        description: Span end timestamp.
+      - name: duration_ms
+        description: Span duration in milliseconds.
+      - name: status_code
+        description: OpenTelemetry status code (UNSET, OK, ERROR).
+      - name: status_message
+        description: Human-readable status message.
+      - name: request_id
+        description: Request identifier; populated on root spans.
+      - name: session_id
+        description: Session identifier; populated on root spans.
+      - name: gen_ai_operation
+        description: GenAI semantic convention operation name.
+      - name: agent_name
+        description: Name of the agent that produced this span.
+      - name: agent_operation
+        description: Specific operation performed by the agent.
+      - name: is_error_span
+        description: True if status_code = 'ERROR'.
+      - name: error_type
+        description: Error type when is_error_span is true.
+      - name: error_message
+        description: Error detail message when is_error_span is true.
+      - name: ingested_at
+        description: Timestamp when the span was ingested into the platform.
+
+  - name: mart_tool_metrics
+    description: >
+      One row per tool span. Filtered to spans where tool_name is not null.
+      Used for tool invocation latency, status, and error dashboards.
+    columns:
+      - name: trace_id
+        description: Distributed trace identifier.
+        tests:
+          - not_null
+      - name: span_id
+        description: Unique span identifier within the trace.
+        tests:
+          - not_null
+      - name: parent_span_id
+        description: Parent span identifier; NULL for root spans.
+      - name: span_name
+        description: Name of the span operation.
+      - name: span_kind
+        description: OpenTelemetry span kind (CLIENT, SERVER, INTERNAL, etc.).
+      - name: service_name
+        description: Name of the service that emitted this span.
+      - name: start_time
+        description: Span start timestamp.
+      - name: end_time
+        description: Span end timestamp.
+      - name: duration_ms
+        description: Span duration in milliseconds.
+      - name: status_code
+        description: OpenTelemetry status code (UNSET, OK, ERROR).
+      - name: status_message
+        description: Human-readable status message.
+      - name: request_id
+        description: Request identifier; populated on root spans.
+      - name: session_id
+        description: Session identifier; populated on root spans.
+      - name: agent_name
+        description: Agent that invoked this tool.
+      - name: agent_operation
+        description: Agent operation context for this tool call.
+      - name: tool_name
+        description: Name of the tool that was invoked.
+      - name: tool_status
+        description: Raw tool execution status as reported by the agent.
+      - name: is_error_span
+        description: True if status_code = 'ERROR'.
+      - name: error_type
+        description: Error type when is_error_span is true.
+      - name: error_message
+        description: Error detail message when is_error_span is true.
+      - name: ingested_at
+        description: Timestamp when the span was ingested into the platform.
+
+  - name: mart_retrieval_metrics
+    description: >
+      One row per retrieval span. Filtered to spans where retrieval_result_count
+      is not null. Used for retrieval quality and latency dashboards.
+    columns:
+      - name: trace_id
+        description: Distributed trace identifier.
+        tests:
+          - not_null
+      - name: span_id
+        description: Unique span identifier within the trace.
+        tests:
+          - not_null
+      - name: parent_span_id
+        description: Parent span identifier; NULL for root spans.
+      - name: span_name
+        description: Name of the span operation.
+      - name: span_kind
+        description: OpenTelemetry span kind (CLIENT, SERVER, INTERNAL, etc.).
+      - name: service_name
+        description: Name of the service that emitted this span.
+      - name: start_time
+        description: Span start timestamp.
+      - name: end_time
+        description: Span end timestamp.
+      - name: duration_ms
+        description: Span duration in milliseconds.
+      - name: status_code
+        description: OpenTelemetry status code (UNSET, OK, ERROR).
+      - name: status_message
+        description: Human-readable status message.
+      - name: request_id
+        description: Request identifier; populated on root spans.
+      - name: session_id
+        description: Session identifier; populated on root spans.
+      - name: agent_name
+        description: Agent that performed this retrieval.
+      - name: agent_operation
+        description: Agent operation context for this retrieval.
+      - name: retrieval_result_count
+        description: Number of documents returned by the retrieval.
+      - name: retrieval_top_relevance_score
+        description: Relevance score of the top-ranked retrieval result.
+      - name: is_error_span
+        description: True if status_code = 'ERROR'.
+      - name: error_type
+        description: Error type when is_error_span is true.
+      - name: error_message
+        description: Error detail message when is_error_span is true.
+      - name: ingested_at
+        description: Timestamp when the span was ingested into the platform.
+
+  - name: mart_error_events
+    description: >
+      One row per error span. Filtered to spans where status_code = 'ERROR'.
+      May contain zero rows if no errors have been observed. Used for error
+      analysis and alerting dashboards.
+    columns:
+      - name: trace_id
+        description: Distributed trace identifier.
+        tests:
+          - not_null
+      - name: span_id
+        description: Unique span identifier within the trace.
+        tests:
+          - not_null
+      - name: parent_span_id
+        description: Parent span identifier; NULL for root spans.
+      - name: span_name
+        description: Name of the span operation.
+      - name: span_kind
+        description: OpenTelemetry span kind (CLIENT, SERVER, INTERNAL, etc.).
+      - name: service_name
+        description: Name of the service that emitted this span.
+      - name: start_time
+        description: Span start timestamp.
+      - name: end_time
+        description: Span end timestamp.
+      - name: duration_ms
+        description: Span duration in milliseconds.
+      - name: status_code
+        description: OpenTelemetry status code; always 'ERROR' in this mart.
+      - name: status_message
+        description: Human-readable status message.
+      - name: request_id
+        description: Request identifier; populated on root spans.
+      - name: session_id
+        description: Session identifier; populated on root spans.
+      - name: gen_ai_operation
+        description: GenAI semantic convention operation name.
+      - name: agent_name
+        description: Agent associated with the error span, if any.
+      - name: agent_operation
+        description: Agent operation context when the error occurred.
+      - name: tool_name
+        description: Tool name if the error occurred during a tool invocation.
+      - name: tool_status
+        description: Tool status at the time of the error.
+      - name: error_type
+        description: Error type classification.
+      - name: error_message
+        description: Detailed error message.
+      - name: ingested_at
+        description: Timestamp when the span was ingested into the platform.

@@ -1,0 +1,134 @@
+version: 2
+
+models:
+  - name: stg_telemetry_spans
+    description: >
+      One row per OTel span sourced from public.telemetry_spans.
+      CHAR(32/16) identity columns are trimmed for downstream portability.
+      Derived boolean flags (is_root_span, is_error_span, is_agent_span,
+      is_tool_span, is_retrieval_span) are added at the staging layer so
+      all consumers share a single definition.
+    columns:
+      - name: trace_id
+        description: Trimmed 32-hex-char trace identifier.
+        data_tests:
+          - not_null
+
+      - name: span_id
+        description: Trimmed 16-hex-char span identifier within the trace.
+        data_tests:
+          - not_null
+
+      - name: parent_span_id
+        description: >
+          Trimmed 16-hex-char parent span identifier.
+          NULL for root spans (is_root_span = true).
+
+      - name: schema_version
+        description: Canonical event schema version emitted by the producer.
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['1.0']
+
+      - name: event_type
+        description: Canonical event type string from the producer envelope.
+
+      - name: span_name
+        description: Human-readable OTel span name.
+
+      - name: span_kind
+        description: OTel SpanKind value.
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['INTERNAL', 'SERVER', 'CLIENT', 'PRODUCER', 'CONSUMER', 'UNSPECIFIED']
+
+      - name: service_name
+        description: Originating service name from OTel resource attributes.
+
+      - name: start_time
+        description: Span start timestamp (UTC).
+
+      - name: end_time
+        description: Span end timestamp (UTC).
+
+      - name: duration_ms
+        description: Span duration in milliseconds (end_time − start_time).
+
+      - name: status_code
+        description: OTel status code — UNSET (default), OK, or ERROR.
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['UNSET', 'OK', 'ERROR']
+
+      - name: status_message
+        description: Optional status detail message; NULL when not set.
+
+      - name: request_id
+        description: >
+          Application-level request identifier.
+          Populated on agentops.request root spans; NULL on child spans.
+
+      - name: session_id
+        description: >
+          Application-level session identifier.
+          Populated on agentops.request root spans; NULL on child spans.
+
+      - name: gen_ai_operation
+        description: GenAI operation type (promoted attribute); NULL when not applicable.
+
+      - name: agent_name
+        description: Agent name (promoted attribute); NULL when not an agent span.
+
+      - name: agent_operation
+        description: Agent operation name (promoted attribute); NULL when not an agent span.
+
+      - name: tool_name
+        description: Tool name (promoted attribute); NULL when not a tool span.
+
+      - name: tool_status
+        description: Tool execution status (promoted attribute); NULL when not a tool span.
+
+      - name: retrieval_result_count
+        description: Number of retrieval results (promoted attribute); NULL when not a retrieval span.
+
+      - name: retrieval_top_relevance_score
+        description: Top relevance score from retrieval (promoted attribute); NULL when not a retrieval span.
+
+      - name: error_type
+        description: Error type string (promoted attribute); NULL when no error.
+
+      - name: error_message
+        description: Error message string (promoted attribute); NULL when no error.
+
+      - name: attributes
+        description: Full raw OTel attribute bag as JSONB.
+
+      - name: kafka_topic
+        description: Kafka topic the span was consumed from.
+
+      - name: kafka_partition
+        description: Kafka partition number (non-negative integer).
+
+      - name: kafka_offset
+        description: Kafka offset within the partition (non-negative BIGINT).
+
+      - name: ingested_at
+        description: Server-assigned timestamp when the row was written to PostgreSQL.
+
+      - name: is_root_span
+        description: True when parent_span_id IS NULL (span has no parent in this trace).
+
+      - name: is_error_span
+        description: True when status_code = 'ERROR'; false otherwise (UNSET and OK are not errors).
+
+      - name: is_agent_span
+        description: True when agent_name IS NOT NULL.
+
+      - name: is_tool_span
+        description: True when tool_name IS NOT NULL.
+
+      - name: is_retrieval_span
+        description: True when retrieval_result_count IS NOT NULL.

@@ -1,0 +1,42 @@
+# docker/bootstrap/compose.main-validation.override.yml
+#
+# VALIDATION ONLY.  Lets the MAIN docker-compose.yml be exercised under a
+# separate Compose project without colliding with a stack that is already
+# running from the same file.
+#
+# The main file gives its services fixed container names and published host
+# ports; both are unique per machine.  For the three services the database
+# path needs, this override removes them.  Volumes and the network are named
+# after the project, so a separate project gets its own, empty ones.  It
+# refers to no volume of any other project.
+#
+# Always pass both files explicitly, a project name of its own, and an
+# environment file with throwaway credentials:
+#
+#   docker compose -p agentops-mainval \
+#     -f docker-compose.yml \
+#     -f docker/bootstrap/compose.main-validation.override.yml \
+#     --env-file <throwaway file> \
+#     up -d postgres db-bootstrap grafana
+#
+# The throwaway environment file must supply every variable the main file
+# requires, including GF_SECURITY_ADMIN_PASSWORD (the Grafana administrator
+# password, separate from GF_DATASOURCE_AGENTOPS_PASSWORD).  Compose cannot
+# resolve the main file without them, even for services that are not started.
+#
+# Start only postgres, db-bootstrap and grafana.  The other services keep
+# their fixed names and ports and would collide.  Because -f is given, a
+# local docker-compose.override.yml is NOT loaded.
+#
+# Remove the validation project, and only it, with the same -p and -f:
+#   ... down --volumes
+
+services:
+
+  postgres:
+    container_name: !reset null
+    ports: !reset []
+
+  grafana:
+    container_name: !reset null
+    ports: !reset []

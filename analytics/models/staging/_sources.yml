@@ -1,0 +1,12 @@
+version: 2
+
+sources:
+  - name: agentops
+    database: agentops
+    schema: public
+    tables:
+      - name: telemetry_spans
+        # loaded_at_field declared for future freshness checks.
+        # No warn_after / error_after — demo env with manual ingestion;
+        # inactivity is expected and does not indicate a pipeline failure.
+        loaded_at_field: ingested_at

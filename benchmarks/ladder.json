@@ -1,0 +1,76 @@
+{
+  "kind": "TARGETS",
+  "note": "Benchmark TARGETS and limits only. Nothing in this file is a result or an achieved number; results are written by run_benchmark.py to a separate JSON file per run, outside the repository.",
+  "schema_version": 1,
+  "defaults": {
+    "scenario": "normal",
+    "seed": 42,
+    "concurrency": 32,
+    "warmup_seconds": 30,
+    "min_measured_seconds": 10,
+    "repetitions": 3,
+    "drain_limit_seconds": 120,
+    "settle_seconds": 6,
+    "sample_interval_seconds": 10,
+    "cell_budget_seconds": 3600
+  },
+  "stop_limits": {
+    "memory_fraction": 0.90,
+    "disk_free_min_gb": 10,
+    "disk_projection_factor": 2.0,
+    "cpu_saturation_percent": 99.5,
+    "cpu_saturation_seconds": 60,
+    "lag_growth_samples": 6,
+    "generator_rate_fraction": 0.95,
+    "late_start_fraction": 0.05,
+    "skew_uncertainty_ms": 10,
+    "skew_drift_ms": 5
+  },
+  "levels": [
+    {
+      "name": "SMOKE",
+      "target_requests": 100,
+      "target_spans": 700,
+      "rates": [5, 10],
+      "live_allowed": true,
+      "refresh_and_detector": true,
+      "note": "target only"
+    },
+    {
+      "name": "SMALL",
+      "target_requests": 1000,
+      "target_spans": 7000,
+      "rates": [10, 25, 50, 100],
+      "live_allowed": true,
+      "refresh_and_detector": true,
+      "note": "target only"
+    },
+    {
+      "name": "MEDIUM",
+      "target_requests": 10000,
+      "target_spans": 70000,
+      "rates": [50, 100, 200],
+      "live_allowed": false,
+      "refresh_and_detector": true,
+      "note": "target only; live runs need a separate authorization"
+    },
+    {
+      "name": "LARGE",
+      "target_requests": 100000,
+      "target_spans": 700000,
+      "rates": [100, 200],
+      "live_allowed": false,
+      "refresh_and_detector": false,
+      "note": "target only; needs --allow-large, a disk budget and its own authorization; the detector is not run (quadratic in history)"
+    },
+    {
+      "name": "STRESS",
+      "target_requests": 500000,
+      "target_spans": 3500000,
+      "rates": [200],
+      "live_allowed": false,
+      "refresh_and_detector": false,
+      "note": "target only; likely beyond a local workstation; its own authorization"
+    }
+  ]
+}

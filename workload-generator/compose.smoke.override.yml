@@ -1,0 +1,51 @@
+# workload-generator/compose.smoke.override.yml
+#
+# Turns the repository's Compose file into a separate, disposable stack for
+# the workload generator's live smoke test.  It is never used on its own and
+# never as docker-compose.override.yml; run_smoke.py passes it explicitly:
+#
+#   docker compose -p agentops-workload-smoke \
+#     -f docker-compose.yml \
+#     -f workload-generator/compose.smoke.override.yml \
+#     --env-file <temporary file> ...
+#
+# What it changes, and nothing else:
+#   - no fixed container names, so nothing collides with the normal stack
+#   - every published port is on 127.0.0.1 and differs from the normal ones
+#       Kafka       19092  (normal stack: 9092)
+#       OTLP gRPC   14317  (normal stack: 4317; OTLP HTTP is not published)
+#       PostgreSQL  15432  (normal stack: 5432)
+#   - the broker tells host clients to come back on the remapped port
+#
+# Only kafka, kafka-init, postgres, db-bootstrap and otel-collector are
+# started with it.  Grafana is not, and keeps its definition untouched.
+
+services:
+
+  kafka:
+    container_name: !reset null
+    # The broker's quorum settings, the collector configuration and the topic
+    # script all name the broker "agentops-kafka".  Inside this project's
+    # network that name is this service.
+    hostname: agentops-kafka
+    ports: !override
+      - "127.0.0.1:19092:9092"
+    environment:
+      KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://agentops-kafka:29092,PLAINTEXT_HOST://127.0.0.1:19092"
+    networks:
+      agentops-net:
+        aliases:
+          - agentops-kafka
+
+  kafka-init:
+    container_name: !reset null
+
+  otel-collector:
+    container_name: !reset null
+    ports: !override
+      - "127.0.0.1:14317:4317"
+
+  postgres:
+    container_name: !reset null
+    ports: !override
+      - "127.0.0.1:15432:5432"

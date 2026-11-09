@@ -1,0 +1,17 @@
+# dbt analytics dependencies for agentops_analytics
+#
+# Versions verified against Python 3.11.15 (CI/container) and intended for
+# use with Python 3.13.7 (Windows development).
+#
+# dbt-postgres==1.11.0 transitively installs dbt-core==1.12.5
+# and psycopg2-binary==2.9.13. Both packages provide Python 3.11
+# and 3.13 wheels as of these release versions.
+#
+# Install into the project venv from the repository root:
+#   pip install -r analytics/requirements.txt
+#
+# Windows PowerShell:
+#   pip install -r analytics\requirements.txt
+
+dbt-core==1.12.5
+dbt-postgres==1.11.0

@@ -1,0 +1,157 @@
+# docker/mvp/compose.yml
+#
+# A dedicated, self-contained stack for the AgentOps MVP trace viewer on a FRESH
+# database.  Stage 1 skeleton: PostgreSQL, the database bootstrap, and the viewer.
+# There is no seed data, detector or analyzer job in this stage, so the viewer
+# starts empty.
+#
+# This file stands alone.  It does not extend, include or override any other
+# Compose file, and it is never combined with one.  Everything it creates is scoped
+# to the Compose project "agentops-mvp" (containers, network and images are named
+# after the project and the service) except the one data volume, which has a fixed,
+# MVP-specific name below.  No service sets a container name.
+#
+# Intended invocation, always with the project name and this file spelled out and
+# a credentials file you keep OUTSIDE version control (a later stage adds a helper
+# that creates and protects it):
+#
+#   docker compose -p agentops-mvp -f docker/mvp/compose.yml --env-file <your-env-file> up -d --build
+#
+# REQUIRED VARIABLES.  Each has no default: Compose stops with a message naming
+# the variable when one is missing.  They are credentials, so choose a different
+# strong value for each, on one line, without quotes.
+#
+#   POSTGRES_PASSWORD                database owner (role "agentops")
+#   GF_DATASOURCE_AGENTOPS_PASSWORD  role grafana_reader (created by the bootstrap)
+#   TRACE_VIEWER_DB_PASSWORD         role trace_viewer_reader (used by the viewer)
+#   ANOMALY_DETECTOR_DB_PASSWORD     role anomaly_detector
+#   RCA_ANALYZER_DB_PASSWORD         role rca_analyzer
+#   INCIDENT_RETRIEVAL_DB_PASSWORD   role incident_retrieval
+#   ALERT_EVALUATOR_DB_PASSWORD      role alert_evaluator
+#   ALERT_NOTIFIER_DB_PASSWORD       role alert_notifier
+#
+# The bootstrap creates every one of those roles and refuses to run when any
+# password is missing or still a placeholder.
+#
+# SECURITY
+#   - PostgreSQL publishes no port at all; it is reachable only by the other
+#     services of this project, and every connection to it uses a password
+#     (scram-sha-256).  No service sets a "trust" authentication method.
+#   - The viewer is the only published port, bound to this machine's loopback
+#     address.  It has NO authentication: do not change the binding to make it
+#     reachable from other machines.
+#   - The viewer runs unprivileged with a read-only root file system, no Linux
+#     capabilities and no-new-privileges.  Its database role is read-only.
+#
+# LIMITS OF THIS STAGE (nothing here has been run yet)
+#   - This file has not been started or built.  Its behaviour on a fresh volume
+#     (in particular the initdb authentication option and the bootstrap applying
+#     all 18 steps including migration 015) is unverified until a live check.
+#   - No memory limits are set.
+
+name: agentops-mvp
+
+services:
+
+  postgres:
+    # The project's PostgreSQL image (PostgreSQL plus pgvector).  No "image:" tag
+    # is set, so Compose names the built image after this project.
+    build:
+      context: ../..
+      dockerfile: docker/postgres/Dockerfile
+    restart: "no"
+    environment:
+      POSTGRES_DB: agentops
+      POSTGRES_USER: agentops
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+      # Applies when the data directory is first created: password (scram-sha-256)
+      # authentication for TCP connections, including from 127.0.0.1 inside the
+      # container, instead of the "trust" default of initdb.
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      # Over TCP on purpose: while the image initializes a new data directory its
+      # temporary server answers on the local socket only and must not be reported
+      # ready.  The check ends after at most 10 s + 20 x (3 s + 3 s).
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 5432 -U agentops -d agentops"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+    networks:
+      - mvp-net
+
+  db-bootstrap:
+    # One-shot: applies the migrations (including 015) and the dbt models to the
+    # EMPTY database, records every step in its ledger, and exits.  It never adopts
+    # a database it did not build.
+    build:
+      context: ../..
+      dockerfile: docker/bootstrap/Dockerfile
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      BOOTSTRAP_DB_HOST: postgres
+      BOOTSTRAP_DB_PORT: "5432"
+      BOOTSTRAP_DB_NAME: agentops
+      BOOTSTRAP_DB_ADMIN_USER: agentops
+      BOOTSTRAP_DB_ADMIN_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+      GF_DATASOURCE_AGENTOPS_PASSWORD: ${GF_DATASOURCE_AGENTOPS_PASSWORD:?GF_DATASOURCE_AGENTOPS_PASSWORD must be set}
+      TRACE_VIEWER_DB_PASSWORD: ${TRACE_VIEWER_DB_PASSWORD:?TRACE_VIEWER_DB_PASSWORD must be set}
+      ANOMALY_DETECTOR_DB_PASSWORD: ${ANOMALY_DETECTOR_DB_PASSWORD:?ANOMALY_DETECTOR_DB_PASSWORD must be set}
+      RCA_ANALYZER_DB_PASSWORD: ${RCA_ANALYZER_DB_PASSWORD:?RCA_ANALYZER_DB_PASSWORD must be set}
+      INCIDENT_RETRIEVAL_DB_PASSWORD: ${INCIDENT_RETRIEVAL_DB_PASSWORD:?INCIDENT_RETRIEVAL_DB_PASSWORD must be set}
+      ALERT_EVALUATOR_DB_PASSWORD: ${ALERT_EVALUATOR_DB_PASSWORD:?ALERT_EVALUATOR_DB_PASSWORD must be set}
+      ALERT_NOTIFIER_DB_PASSWORD: ${ALERT_NOTIFIER_DB_PASSWORD:?ALERT_NOTIFIER_DB_PASSWORD must be set}
+    networks:
+      - mvp-net
+
+  viewer:
+    build:
+      context: ../..
+      dockerfile: docker/trace-viewer/Dockerfile
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      db-bootstrap:
+        condition: service_completed_successfully
+    environment:
+      TRACE_VIEWER_DB_HOST: postgres
+      TRACE_VIEWER_DB_PORT: "5432"
+      TRACE_VIEWER_DB_NAME: agentops
+      TRACE_VIEWER_DB_USER: trace_viewer_reader
+      TRACE_VIEWER_DB_PASSWORD: ${TRACE_VIEWER_DB_PASSWORD:?TRACE_VIEWER_DB_PASSWORD must be set}
+    ports:
+      # The only published port of this stack, on the loopback address only.
+      - "127.0.0.1:8000:8000"
+    healthcheck:
+      # The liveness route does not touch the database.
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - mvp-net
+
+networks:
+  mvp-net:
+    driver: bridge
+
+volumes:
+  postgres-data:
+    # A fixed name, separate from any other PostgreSQL volume.
+    name: agentops-mvp-postgres-data
+    labels:
+      agentops.mvp: "true"
