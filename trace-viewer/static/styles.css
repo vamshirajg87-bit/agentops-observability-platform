@@ -646,6 +646,12 @@ body.detail-mode .filter-nav { display: none; }
   padding: 2px 0;
 }
 
+.span-panel-empty.hidden,
+#span-panel-content.hidden,
+#anomaly-trace-btn.hidden {
+  display: none;
+}
+
 .span-panel-heading {
   font-size: 11px;
   font-weight: 500;

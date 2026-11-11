@@ -61,6 +61,54 @@ Around the pipeline, the deterministic workload can be checked against a plan, a
 stage on a disposable Docker Compose project and cleans up afterwards. That harness is pinned to one Windows
 machine; see [Limitations](#limitations).
 
+## Platform Walkthrough
+
+> **All screenshots use synthetic demonstration data. The displayed anomaly events and root-cause investigations are
+> precomputed demonstration records, not evidence of a live production detection or automated RCA run.**
+
+The four screenshots below show the local Trace Viewer on a small, deterministic synthetic dataset (14 traces, 96
+spans, 2 anomaly events and 2 RCA investigations). They were captured from a local, isolated instance. This dataset is
+separate from the Phase 14.7 runs and from the accepted local Viewer dataset described under
+[Validation status](#validation-status), and its counts are not combined with theirs. The screenshots show what the
+viewer displays; they do not show a production deployment, a hosted service, a live anomaly-inference run or a live
+automated RCA execution.
+
+### 1. Observability Dashboard
+
+![Trace Viewer dashboard listing 14 synthetic traces, each tagged as synthetic demo data](docs/screenshots/agentops-dashboard-overview.png)
+
+The trace overview lists the synthetic traces with a status indicator (one trace has errors, the others are healthy),
+start time, duration, root operation, service, span count and a per-trace span breakdown. Every row carries a
+"Synthetic Demo Data" tag. The Traces and Anomalies tabs, the filters and the search fields lead into an investigation,
+and selecting a row opens that trace.
+
+### 2. Trace Investigation
+
+![Trace Viewer showing the execution tree of a failed synthetic trace with the failed tool call selected](docs/screenshots/agentops-trace-investigation.png)
+
+A trace opens as an execution tree of its spans. In this synthetic trace the `tool.execute` span failed after 150 ms. The
+failure banner names that span, the span is selected in the tree, and the span-details panel shows its identifiers,
+timing, status, agent attributes and the recorded error type and message. The failure text refers to a synthetic host
+name.
+
+### 3. Anomaly Detection
+
+![Trace Viewer anomaly list showing a synthetic tool-failure anomaly and a synthetic latency anomaly](docs/screenshots/agentops-anomaly-detection.png)
+
+The anomaly list shows two synthetic anomaly events: a tool failure on `tool.execute` and a latency anomaly on the same
+operation (2350 ms observed). Both are listed with severity, event time, service, operation, observed value and the
+related trace ID. Both records are precomputed demonstration data.
+
+### 4. Evidence-Backed Root-Cause Analysis
+
+![Trace Viewer root-cause analysis for the synthetic tool-failure anomaly with ranked supporting evidence](docs/screenshots/agentops-rca-evidence.png)
+
+The anomaly detail view pairs the anomaly with its investigation: an investigation summary, a confidence label (HIGH),
+the recorded limitations (including a note that the investigation is synthetic and was computed offline from seeded
+spans, not produced by the RCA analyzer worker) and five ranked supporting evidence spans, each with its score, score
+breakdown and span details. As noted under [What you can explore](#what-you-can-explore), a confidence label such as
+HIGH is not a measured accuracy.
+
 ## Component status
 
 | Component | Implemented | Included in the successful end-to-end runs |
